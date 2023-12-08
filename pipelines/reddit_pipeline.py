@@ -1,4 +1,7 @@
 import pandas as pd
+
+from airflow.operators.python import task
+
 from etls.reddit_etl import (
     reddit_connection,
     extract_posts,
@@ -13,7 +16,8 @@ from utils.constants import (
 )
 
 
-def reddit_pipeline(file_name: str, subreddit: str, time_filter="day", limit=None):
+@task
+def reddit_pipeline(file_name: str, subreddit: str, time_filter="day", limit=None) -> str:
     # Reddit Instance Connection.
     instance = reddit_connection(REDDIT_CLIENT_ID, REDDIT_SECRET_KEY, REDDIT_USER_AGENT)
     # Data Extraction.

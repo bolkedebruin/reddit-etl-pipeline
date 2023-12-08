@@ -1,14 +1,17 @@
 import os
 import sys
+
 from datetime import datetime, timedelta
-from airflow import DAG
+
+from airflow.decorators import dag, task
+from airflow.io.path import ObjectStoragePath
 from airflow.models import Variable
-from airflow.operators.python import PythonOperator
+
+from pipelines.reddit_pipeline import reddit_pipeline
+from utils.constants import AWS_BUCKET_NAME
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pipelines.aws_s3_pipeline import upload_s3_pipeline
-from pipelines.reddit_pipeline import reddit_pipeline
 
 default_args = {
     "owner": "Aritra Ganguly",
@@ -23,7 +26,8 @@ default_args = {
 
 file_postfix = datetime.now().strftime("%Y%m%d")
 
-dag = DAG(
+
+@dag(
     dag_id="reddit_etl_pipeline",
     description="ETL Pipeline Design from Reddit API to AWS.",
     default_args=default_args,
@@ -31,21 +35,23 @@ dag = DAG(
     catchup=False,
     tags=["reddit", "etl", "pipeline"],
 )
+def reddit_dag():
+    filename = reddit_pipeline(
+        file_name=f"reddit_data_{file_postfix}",
+        subreddit=Variable.get("subreddit"),
+        time_filter="day",
+        limit=100,
+    )
 
-extract_reddit_data = PythonOperator(
-    task_id="extract_reddit_data",
-    python_callable=reddit_pipeline,
-    op_kwargs={
-        "file_name": f"reddit_data_{file_postfix}",
-        "subreddit": Variable.get("subreddit"),
-        "time_filter": "day",
-        "limit": 100,
-    },
-    dag=dag,
-)
+    @task
+    def upload_data_s3(src_path: str) -> None:
+        dst = ObjectStoragePath(f"s3://{AWS_BUCKET_NAME}/raw/")
+        dst.mkdir(parents=True, exist_ok=True)
 
-upload_data_s3 = PythonOperator(
-    task_id="upload_data_s3", python_callable=upload_s3_pipeline, dag=dag
-)
+        src = ObjectStoragePath(src_path)
+        src.copy(dst)
 
-extract_reddit_data >> upload_data_s3
+    upload_data_s3(filename)
+
+
+reddit_dag()
